@@ -122,4 +122,40 @@
   (var-get last-campaign-id)
 )
 
-
+;; Function to refund a contributor if the campaign fails
+(define-public (refund (campaign-id uint))
+  (let
+    (
+      (campaign (unwrap! (map-get? Campaigns { campaign-id: campaign-id }) ERR-CAMPAIGN-NOT-FOUND)) ;; Fetch campaign details
+      (contribution (unwrap! (map-get? Contributions { campaign-id: campaign-id, contributor: tx-sender }) ERR-NOT-AUTHORIZED)) ;; Fetch contributor's contribution
+      (current-block block-height) ;; Get current block height
+      (campaign-deadline (get deadline campaign)) ;; Get campaign deadline
+      (campaign-goal (get goal campaign)) ;; Get campaign goal
+      (total-funded (get total-funded campaign)) ;; Get total funded amount
+      (refund-amount (get amount contribution)) ;; Get contributor's refund amount
+    )
+    ;; Ensure the campaign has ended and the goal was not met
+    (asserts! (> current-block campaign-deadline) ERR-ACTIVE-CAMPAIGN)
+    (asserts! (< total-funded campaign-goal) ERR-GOAL-NOT-REACHED)
+    (asserts! (get active campaign) ERR-ALREADY-ENDED)
+    (asserts! (> refund-amount u0) ERR-NOT-AUTHORIZED)
+    
+    ;; Delete the contributor's contribution record
+    (map-delete Contributions 
+      { campaign-id: campaign-id, contributor: tx-sender })
+    
+    ;; Log the refund event for auditing
+    (print { 
+      event: "refund",
+      campaign-id: campaign-id,
+      contributor: tx-sender,
+      amount: refund-amount,
+      block-height: current-block
+    })
+    
+    ;; Transfer the refund amount back to the contributor
+    (try! (as-contract (stx-transfer? refund-amount tx-sender tx-sender)))
+    
+    (ok true)
+  )
+)
